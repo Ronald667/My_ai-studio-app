@@ -1,0 +1,6 @@
+{
+  "name": "OmniWork Enterprise Collaboration & Operations Suite",
+  "description": "Comprehensive enterprise workspace for office task management, deadline tracking, real-time team communication, collaborative document sharing, automated workflows, production inventory, advanced analytics, role-based access control, and GDPR/HIPAA compliance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
