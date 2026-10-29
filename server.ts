@@ -29,6 +29,7 @@ import {
   DocumentItem,
   InventoryItem,
   InventoryMovement,
+  MovementType,
   ProductionWorkOrder,
   WorkflowRule,
   AppNotification,
@@ -508,6 +509,31 @@ wss.on('connection', (ws) => {
           break;
         }
 
+        case 'USER_DELETE': {
+          const target = db.users.find((u) => u.id === payload.id);
+          if (target) {
+            db.users = db.users.filter((u) => u.id !== payload.id);
+            db.subscription.seatsUsed = db.users.length;
+            broadcast('USER_DELETED', payload.id);
+
+            const cmpRecord: ComplianceRecord = {
+              id: `cmp-${Date.now()}`,
+              standard: 'GDPR',
+              type: 'ACCESS_CONTROL_CHANGE',
+              subject: `User Identity Revoked: ${target.name} (${target.email})`,
+              operator: 'Admin User Governance',
+              operatorRole: 'super_admin',
+              status: 'verified',
+              timestamp: new Date().toISOString(),
+              hashSignature: Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(''),
+              details: `Tenant seat released. Account decommissioned for [${target.name}] (${target.role}).`,
+            };
+            db.complianceRecords.unshift(cmpRecord);
+            broadcast('COMPLIANCE_RECORD_ADDED', cmpRecord);
+          }
+          break;
+        }
+
         case 'SUBSCRIPTION_UPGRADE': {
           const { plan, interval, seats } = payload;
           const currentPlan = (plan || 'professional') as SubscriptionPlanTier;
@@ -796,6 +822,71 @@ app.post('/api/users/register', (req, res) => {
   res.status(201).json({ success: true, user: newUser });
 });
 
+app.patch('/api/users/:id', (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+  const userIdx = db.users.findIndex((u) => u.id === id);
+  if (userIdx === -1) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+
+  db.users[userIdx] = { ...db.users[userIdx], ...updates };
+  broadcast('USER_UPDATED', db.users[userIdx]);
+
+  res.json({ success: true, user: db.users[userIdx] });
+});
+
+app.delete('/api/users/:id', (req, res) => {
+  const { id } = req.params;
+  const target = db.users.find((u) => u.id === id);
+  if (!target) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+
+  db.users = db.users.filter((u) => u.id !== id);
+  db.subscription.seatsUsed = db.users.length;
+  broadcast('USER_DELETED', id);
+
+  const cmpRecord: ComplianceRecord = {
+    id: `cmp-${Date.now()}`,
+    standard: 'GDPR',
+    type: 'ACCESS_CONTROL_CHANGE',
+    subject: `User Identity Revoked: ${target.name} (${target.email})`,
+    operator: 'REST API Admin Request',
+    operatorRole: 'super_admin',
+    status: 'verified',
+    timestamp: new Date().toISOString(),
+    hashSignature: Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(''),
+    details: `Tenant seat released. Account decommissioned for [${target.name}] (${target.role}).`,
+  };
+  db.complianceRecords.unshift(cmpRecord);
+  broadcast('COMPLIANCE_RECORD_ADDED', cmpRecord);
+
+  res.json({ success: true, deletedId: id });
+});
+
+app.post('/api/users/:id/reset-password', (req, res) => {
+  const { id } = req.params;
+  const target = db.users.find((u) => u.id === id);
+  if (!target) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+
+  const notif: AppNotification = {
+    id: `notif-${Date.now()}`,
+    title: 'Security Link Dispatched',
+    message: `A password reset & security verification email was dispatched to ${target.email}.`,
+    type: 'compliance',
+    timestamp: new Date().toISOString(),
+    read: false,
+    linkTab: 'users',
+  };
+  db.notifications.unshift(notif);
+  broadcast('NOTIFICATION_ADDED', notif);
+
+  res.json({ success: true, message: `Reset link dispatched to ${target.email}.` });
+});
+
 app.post('/api/payment-methods', (req, res) => {
   const payload = req.body;
   const newMethod: PaymentMethod = {
@@ -825,6 +916,160 @@ app.post('/api/payment-methods', (req, res) => {
   broadcast('SUBSCRIPTION_UPDATED', db.subscription);
 
   res.status(201).json({ success: true, paymentMethod: newMethod, subscription: db.subscription });
+});
+
+// Full application state synchronization endpoint for initial load & offline recovery
+app.get('/api/state', (req, res) => {
+  res.json({
+    success: true,
+    state: {
+      users: db.users,
+      projects: db.projects,
+      tasks: db.tasks,
+      channels: db.channels,
+      messages: db.messages,
+      documents: db.documents,
+      inventory: db.inventory,
+      inventoryMovements: db.inventoryMovements,
+      workOrders: db.workOrders,
+      workflows: db.workflows,
+      notifications: db.notifications,
+      complianceRecords: db.complianceRecords,
+      cloudFiles: db.cloudFiles,
+      subscription: db.subscription,
+      connectedClientsCount: wss.clients.size,
+    },
+  });
+});
+
+// Offline mutations synchronization batch endpoint (flushes pending IndexedDB mutations upon reconnection)
+app.post('/api/sync/offline-batch', (req, res) => {
+  const { mutations } = req.body;
+  if (!Array.isArray(mutations)) {
+    return res.status(400).json({ success: false, error: 'Mutations array required' });
+  }
+
+  let processedCount = 0;
+  const processedIds: string[] = [];
+
+  for (const mut of mutations) {
+    try {
+      switch (mut.type) {
+        case 'TASK_CREATE': {
+          const newTask: Task = {
+            ...mut.payload,
+            id: mut.payload.id || `task-${Date.now()}`,
+            createdAt: mut.payload.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          // Avoid duplicate task if already present
+          if (!db.tasks.some((t) => t.id === newTask.id)) {
+            db.tasks.unshift(newTask);
+            broadcast('TASK_CREATED', newTask);
+          }
+          break;
+        }
+
+        case 'TASK_UPDATE': {
+          const idx = db.tasks.findIndex((t) => t.id === mut.payload.id);
+          if (idx !== -1) {
+            const oldStatus = db.tasks[idx].status;
+            db.tasks[idx] = { ...db.tasks[idx], ...mut.payload, updatedAt: new Date().toISOString() };
+            broadcast('TASK_UPDATED', db.tasks[idx]);
+            if (oldStatus !== db.tasks[idx].status) {
+              triggerAutomatedWorkflows('task_status_change', db.tasks[idx]);
+            }
+          }
+          break;
+        }
+
+        case 'TASK_DELETE': {
+          db.tasks = db.tasks.filter((t) => t.id !== mut.payload.id);
+          broadcast('TASK_DELETED', mut.payload.id);
+          break;
+        }
+
+        case 'INVENTORY_ADJUST': {
+          const { itemId, type, quantity, referenceOrder, performedBy, notes } = mut.payload;
+          const idx = db.inventory.findIndex((i) => i.id === itemId);
+          if (idx !== -1) {
+            const item = db.inventory[idx];
+            let newQty = item.quantity;
+            if (type === 'receipt' || type === 'audit_correction') {
+              newQty += quantity;
+            } else if (type === 'consumption' || type === 'transfer') {
+              newQty = Math.max(0, newQty - quantity);
+            }
+
+            const newStatus =
+              newQty === 0
+                ? 'out_of_stock'
+                : newQty <= item.minThreshold
+                ? 'low_stock'
+                : 'in_stock';
+
+            db.inventory[idx] = {
+              ...item,
+              quantity: newQty,
+              status: newStatus,
+              lastAudited: new Date().toISOString().split('T')[0],
+            };
+
+            const prevQty = item.quantity;
+            const newMovement: InventoryMovement = {
+              id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              itemId: item.id,
+              itemName: item.name,
+              sku: item.sku,
+              type: (type as MovementType) || 'stock_out',
+              quantity,
+              previousQuantity: prevQty,
+              newQuantity: newQty,
+              performedBy: performedBy || 'Offline Operator (Reconciled)',
+              timestamp: new Date().toISOString(),
+              referenceOrder: referenceOrder || 'OFFLINE-BATCH',
+              notes: notes || 'Batch reconciled from offline IndexedDB queue',
+            };
+
+            db.inventoryMovements.unshift(newMovement);
+            broadcast('INVENTORY_UPDATED', { item: db.inventory[idx], movement: newMovement });
+
+            if (newStatus === 'low_stock' || newStatus === 'out_of_stock') {
+              triggerAutomatedWorkflows('inventory_low_stock', db.inventory[idx]);
+            }
+          }
+          break;
+        }
+
+        case 'INVENTORY_ITEM_CREATE': {
+          const newItem: InventoryItem = {
+            ...mut.payload,
+            id: mut.payload.id || `inv-${Date.now()}`,
+          };
+          if (!db.inventory.some((i) => i.id === newItem.id)) {
+            db.inventory.unshift(newItem);
+            broadcast('INVENTORY_ITEM_CREATED', newItem);
+          }
+          break;
+        }
+      }
+
+      processedCount++;
+      processedIds.push(mut.id);
+    } catch (itemErr) {
+      console.error('Error processing offline mutation:', mut, itemErr);
+    }
+  }
+
+  return res.json({
+    success: true,
+    processedCount,
+    processedIds,
+    tasks: db.tasks,
+    inventory: db.inventory,
+    inventoryMovements: db.inventoryMovements,
+    reconciledAt: new Date().toISOString(),
+  });
 });
 
 // AI Workflow & Analytics Assistant Endpoint (Gemini API Server-Side)

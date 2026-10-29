@@ -16,6 +16,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   FolderOpen,
+  Download,
+  Printer,
 } from 'lucide-react';
 
 interface DocumentsViewProps {
@@ -77,6 +79,65 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({ onOpenNewDocument 
     setHasUnsavedChanges(false);
   };
 
+  const handleExportCSV = () => {
+    const headers = 'ID,Title,Category,Version,Author,LastModified,PHI,Encrypted\n';
+    const rows = state.documents
+      .map(
+        (d) =>
+          `"${d.id}","${d.title.replace(/"/g, '""')}","${d.category}",${d.version},"${d.authorName}","${new Date(d.lastModified).toISOString()}",${d.phiFlag},${d.isEncrypted}`
+      )
+      .join('\n');
+
+    const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `documents_audit_report_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
+
+  const handleExportPDF = () => {
+    if (!selectedDoc) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${selectedDoc.title} - Enterprise Report</title>
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; padding: 40px; color: #1e293b; line-height: 1.6; }
+            header { border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 24px; }
+            h1 { font-size: 24px; margin: 0 0 8px 0; color: #0f172a; }
+            .meta { font-size: 12px; color: #64748b; display: flex; gap: 16px; flex-wrap: wrap; }
+            .content { font-size: 14px; white-space: pre-wrap; margin-top: 20px; }
+            footer { margin-top: 40px; border-top: 1px solid #e2e8f0; padding-top: 16px; font-size: 10px; color: #94a3b8; display: flex; justify-content: space-between; }
+          </style>
+        </head>
+        <body>
+          <header>
+            <h1>${selectedDoc.title}</h1>
+            <div class="meta">
+              <span>Category: ${selectedDoc.category}</span>
+              <span>Version: ${selectedDoc.version}</span>
+              <span>Author: ${selectedDoc.authorName}</span>
+              <span>Date: ${new Date(selectedDoc.lastModified).toLocaleDateString()}</span>
+            </div>
+          </header>
+          <div class="content">${selectedDoc.content}</div>
+          <footer>
+            <span>Enterprise Compliance & Governance System</span>
+            <span>Confidential Report</span>
+          </footer>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 500);
+  };
+
   return (
     <div
       id="documents-view"
@@ -91,13 +152,29 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({ onOpenNewDocument 
               Documents & SOPs
             </span>
           </div>
-          <button
-            onClick={onOpenNewDocument}
-            className="p-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs shadow-xs"
-            title="New Document"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleExportCSV}
+              className="p-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs shadow-xs"
+              title="Export All Documents as CSV"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={handleExportPDF}
+              className="p-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs shadow-xs"
+              title="Export Selected Document as PDF / Print Report"
+            >
+              <Printer className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={onOpenNewDocument}
+              className="p-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs shadow-xs"
+              title="New Document"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
 
         {/* Search & Category Filter */}

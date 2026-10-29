@@ -93,6 +93,68 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     link.click();
   };
 
+  const handleExportPDF = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    const totalVal = state.inventory.reduce((sum, i) => sum + i.quantity * i.unitCost, 0);
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Inventory & Stock Valuation Report</title>
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; padding: 40px; color: #1e293b; }
+            h1 { font-size: 22px; margin-bottom: 4px; color: #0f172a; }
+            p { font-size: 12px; color: #64748b; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 16px; }
+            th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+            th { background: #f1f5f9; font-weight: 600; color: #334155; }
+            footer { margin-top: 30px; font-size: 10px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+          </style>
+        </head>
+        <body>
+          <h1>Inventory & Stock Valuation Report</h1>
+          <p>Generated on ${new Date().toLocaleDateString()} • Total Valuation: $${totalVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} • Tracked SKUs: ${state.inventory.length}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Item Name</th>
+                <th>Category</th>
+                <th>Qty</th>
+                <th>Unit</th>
+                <th>Unit Cost</th>
+                <th>Total Valuation</th>
+                <th>Location</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${state.inventory.map(i => `
+                <tr>
+                  <td>${i.sku}</td>
+                  <td>${i.name}</td>
+                  <td>${i.category}</td>
+                  <td>${i.quantity}</td>
+                  <td>${i.unit}</td>
+                  <td>$${i.unitCost.toFixed(2)}</td>
+                  <td>$${(i.quantity * i.unitCost).toFixed(2)}</td>
+                  <td>${i.warehouseLocation}</td>
+                  <td>${i.status}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <footer>Enterprise ERP & Inventory Management System • Confidential Audit Report</footer>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 500);
+  };
+
   const handleAiOptimization = async () => {
     setLoadingAi(true);
     const res = await askAIAssist('inventory_optimization');
@@ -113,7 +175,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs"
+          >
+            <Download className="h-4 w-4" />
+            <span>Export CSV</span>
+          </button>
+
+          <button
+            onClick={handleExportPDF}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs"
+          >
+            <Printer className="h-4 w-4" />
+            <span>Export PDF Report</span>
+          </button>
+
           <button
             onClick={onOpenStockAdjust}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-xs"

@@ -16,6 +16,7 @@ import { ComplianceView } from './components/views/ComplianceView';
 import { CloudStorageView } from './components/views/CloudStorageView';
 import { AnalyticsView } from './components/views/AnalyticsView';
 import { BillingView } from './components/views/BillingView';
+import { UsersManagementView } from './components/views/UsersManagementView';
 
 // Modals
 import { NewTaskModal } from './components/modals/NewTaskModal';
@@ -72,6 +73,7 @@ const AppContent: React.FC = () => {
             {currentTab === 'cloud' && <CloudStorageView />}
             {currentTab === 'analytics' && <AnalyticsView />}
             {currentTab === 'billing' && <BillingView />}
+            {currentTab === 'users' && <UsersManagementView />}
           </div>
         </main>
       </div>

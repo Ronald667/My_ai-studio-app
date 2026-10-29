@@ -14,6 +14,7 @@ export interface Translations {
   navCloud: string;
   navAnalytics: string;
   navBilling: string;
+  navUsers: string;
   // Roles
   roleSuperAdmin: string;
   roleProjectManager: string;
@@ -141,6 +142,7 @@ export const translations: Record<Language, Translations> = {
     navCloud: 'Secure Cloud Storage',
     navAnalytics: 'Advanced Analytics',
     navBilling: 'Plans & Billing',
+    navUsers: 'User Directory',
     roleSuperAdmin: 'Super Admin',
     roleProjectManager: 'Project Manager',
     roleComplianceOfficer: 'Compliance Officer',
@@ -253,6 +255,7 @@ export const translations: Record<Language, Translations> = {
     navCloud: 'Almacenamiento Seguro',
     navAnalytics: 'Analíticas Avanzadas',
     navBilling: 'Planes y Facturación',
+    navUsers: 'Directorio de Usuarios',
     roleSuperAdmin: 'Superadministrador',
     roleProjectManager: 'Gerente de Proyecto',
     roleComplianceOfficer: 'Oficial de Cumplimiento',
@@ -365,6 +368,7 @@ export const translations: Record<Language, Translations> = {
     navCloud: 'Cloud-Speicher',
     navAnalytics: 'Analytik & Berichte',
     navBilling: 'Tarife & Abrechnung',
+    navUsers: 'Benutzerverwaltung',
     roleSuperAdmin: 'Super-Administrator',
     roleProjectManager: 'Projektleiter',
     roleComplianceOfficer: 'Datenschutzbeauftragter',
@@ -477,6 +481,7 @@ export const translations: Record<Language, Translations> = {
     navCloud: 'Stockage Cloud Sécurisé',
     navAnalytics: 'Analytique & Rapports',
     navBilling: 'Abonnements & Facturation',
+    navUsers: 'Gestion des Utilisateurs',
     roleSuperAdmin: 'Super Administrateur',
     roleProjectManager: 'Chef de Projet',
     roleComplianceOfficer: 'Délégué à la Conformité',
@@ -589,6 +594,7 @@ export const translations: Record<Language, Translations> = {
     navCloud: 'セキュアクラウド保管',
     navAnalytics: '高度分析・レポート',
     navBilling: 'プランと請求',
+    navUsers: 'ユーザー・権限管理',
     roleSuperAdmin: '特権管理者 (Super Admin)',
     roleProjectManager: 'プロジェクトマネージャー',
     roleComplianceOfficer: 'コンプライアンス責任者',
@@ -701,6 +707,7 @@ export const translations: Record<Language, Translations> = {
     navCloud: '安全云存储',
     navAnalytics: '高级报表分析',
     navBilling: '订阅方案与账单',
+    navUsers: '用户与权限管理',
     roleSuperAdmin: '超级管理员 (Super Admin)',
     roleProjectManager: '项目经理',
     roleComplianceOfficer: '合规官 (Compliance)',

@@ -18,6 +18,7 @@ import {
   UserPlus,
   CreditCard,
   User as UserIcon,
+  Users,
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -368,6 +369,25 @@ export const Header: React.FC = () => {
                   >
                     <UserPlus className="h-4 w-4" />
                     <span>+ Create New User Account</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      setCurrentTab('users');
+                    }}
+                    className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Users className="h-4 w-4 text-violet-500" />
+                      <span>{t.navUsers}</span>
+                    </div>
+                    {currentUser.role === 'super_admin' && (
+                      <span className="text-[10px] bg-violet-100 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 font-bold px-1.5 py-0.5 rounded">
+                        Admin
+                      </span>
+                    )}
                   </button>
 
                   <button

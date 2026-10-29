@@ -15,6 +15,7 @@ import {
   CreditCard,
   Sparkles,
   UserPlus,
+  Users,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -105,6 +106,13 @@ export const Sidebar: React.FC<SidebarProps> = () => {
       icon: CreditCard,
       badge: currentPlan.toUpperCase(),
       badgeColor: 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30',
+    },
+    {
+      id: 'users',
+      label: t.navUsers,
+      icon: Users,
+      badge: currentUser.role === 'super_admin' ? 'ADMIN' : `${state.users.length}`,
+      badgeColor: 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/30',
     },
   ];
 

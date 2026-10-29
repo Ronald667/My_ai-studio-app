@@ -1,5 +1,27 @@
 import React, { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import {
+  openOfflineDb,
+  getAllTasksFromDb,
+  saveTaskToDb,
+  saveAllTasksToDb,
+  deleteTaskFromDb,
+  getAllInventoryFromDb,
+  saveInventoryItemToDb,
+  saveAllInventoryToDb,
+  getAllInventoryMovementsFromDb,
+  saveInventoryMovementToDb,
+  saveAllInventoryMovementsToDb,
+  queueOfflineMutation,
+  getPendingMutationsFromDb,
+  removeMutationFromDb,
+  clearAllMutationsFromDb,
+  setDbMetadata,
+  getDbMetadata,
+  getOfflineStorageStats,
+  OfflineMutation,
+  OfflineStorageStats,
+} from '../lib/offlineDb';
+import {
   User,
   UserRole,
   Project,
@@ -9,6 +31,8 @@ import {
   DocumentItem,
   InventoryItem,
   InventoryMovement,
+  InventoryStatus,
+  MovementType,
   ProductionWorkOrder,
   WorkflowRule,
   AppNotification,
@@ -50,7 +74,8 @@ export type NavTab =
   | 'compliance'
   | 'cloud'
   | 'analytics'
-  | 'billing';
+  | 'billing'
+  | 'users';
 
 interface AppContextType {
   // State
@@ -70,8 +95,23 @@ interface AppContextType {
   isSocketConnected: boolean;
   pushEnabled: boolean;
   setPushEnabled: (enabled: boolean) => void;
+  showPushAlert: (title: string, body: string) => void;
   notificationDrawerOpen: boolean;
   setNotificationDrawerOpen: (open: boolean) => void;
+
+  // Offline & IndexedDB Synchronization
+  isOnline: boolean;
+  isOfflineSimulated: boolean;
+  effectiveOnline: boolean;
+  toggleOfflineSimulation: () => void;
+  setOfflineSimulation: (simulated: boolean) => void;
+  isIndexedDbReady: boolean;
+  syncStatus: 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
+  pendingOfflineMutationsCount: number;
+  lastSyncTimestamp: string | null;
+  syncOfflineQueue: () => Promise<void>;
+  offlineStatsModalOpen: boolean;
+  setOfflineStatsModalOpen: (open: boolean) => void;
 
   // Account & Upgrade Modals
   isCreateAccountOpen: boolean;
@@ -98,6 +138,7 @@ interface AppContextType {
   ) => User;
   switchUser: (userId: string) => void;
   updateUserProfile: (userId: string, updates: Partial<User>) => void;
+  deleteUserAccount: (userId: string) => void;
 
   // Subscription & Payment Methods
   upgradeSubscription: (plan: SubscriptionPlanTier, interval?: BillingInterval, seats?: number) => void;
@@ -225,6 +266,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isAddPaymentMethodOpen, setIsAddPaymentMethodOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<BillingInvoice | null>(null);
 
+  // Offline & IndexedDB Synchronization State
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+  const [isOfflineSimulated, setIsOfflineSimulated] = useState<boolean>(false);
+  const [isIndexedDbReady, setIsIndexedDbReady] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'offline' | 'error'>('idle');
+  const [pendingOfflineMutationsCount, setPendingOfflineMutationsCount] = useState<number>(0);
+  const [lastSyncTimestamp, setLastSyncTimestamp] = useState<string | null>(null);
+  const [offlineStatsModalOpen, setOfflineStatsModalOpen] = useState<boolean>(false);
+
+  const effectiveOnline = isOnline && !isOfflineSimulated;
+
   const wsRef = useRef<WebSocket | null>(null);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
 
@@ -251,6 +305,85 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  // 1. Initialize IndexedDB & hydrate tasks/inventory from local storage immediately
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initOfflinePersistence() {
+      try {
+        const [savedTasks, savedInventory, savedMovements, pendingMutations, savedSyncMeta] =
+          await Promise.all([
+            getAllTasksFromDb(),
+            getAllInventoryFromDb(),
+            getAllInventoryMovementsFromDb(),
+            getPendingMutationsFromDb(),
+            getDbMetadata('lastOnlineSync'),
+          ]);
+
+        if (isMounted) {
+          setIsIndexedDbReady(true);
+          setPendingOfflineMutationsCount(pendingMutations.length);
+          if (savedSyncMeta) setLastSyncTimestamp(savedSyncMeta);
+
+          // If local IndexedDB already has tasks or inventory, populate state immediately so user can view/manage offline
+          if (savedTasks.length > 0 || savedInventory.length > 0) {
+            setState((prev) => ({
+              ...prev,
+              tasks: savedTasks.length > 0 ? savedTasks : prev.tasks,
+              inventory: savedInventory.length > 0 ? savedInventory : prev.inventory,
+              inventoryMovements:
+                savedMovements.length > 0 ? savedMovements : prev.inventoryMovements,
+            }));
+          } else {
+            // First visit seeding: save initial tasks & inventory into IndexedDB
+            await Promise.all([
+              saveAllTasksToDb(initialTasks),
+              saveAllInventoryToDb(initialInventory),
+              saveAllInventoryMovementsToDb(initialInventoryMovements),
+              setDbMetadata('lastOnlineSync', new Date().toISOString()),
+            ]);
+            setLastSyncTimestamp(new Date().toISOString());
+          }
+        }
+      } catch (err) {
+        console.warn('[IndexedDB] Init error:', err);
+      }
+    }
+
+    initOfflinePersistence();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // 2. Setup browser network online / offline listeners
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      showPushAlert('Network Reconnected', 'Connection restored. Syncing offline changes...');
+      // Trigger sync
+      syncOfflineQueue();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      setSyncStatus('offline');
+      showPushAlert(
+        'Working Offline',
+        'Disconnected from network. Tasks & inventory stored locally in IndexedDB.'
+      );
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [effectiveOnline]);
+
   // Setup BroadcastChannel for immediate multi-tab cross-synchronization
   useEffect(() => {
     if (typeof BroadcastChannel !== 'undefined') {
@@ -270,6 +403,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Setup WebSocket connection to server
   useEffect(() => {
+    if (!effectiveOnline) {
+      setIsSocketConnected(false);
+      return;
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
 
@@ -277,6 +415,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     let reconnectTimer: any = null;
 
     function connect() {
+      if (!effectiveOnline) {
+        setIsSocketConnected(false);
+        return;
+      }
+
       try {
         socket = new WebSocket(wsUrl);
         wsRef.current = socket;
@@ -296,7 +439,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         socket.onclose = () => {
           setIsSocketConnected(false);
-          reconnectTimer = setTimeout(connect, 3000);
+          if (effectiveOnline) {
+            reconnectTimer = setTimeout(connect, 3000);
+          }
         };
 
         socket.onerror = () => {
@@ -304,7 +449,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         };
       } catch {
         setIsSocketConnected(false);
-        reconnectTimer = setTimeout(connect, 3000);
+        if (effectiveOnline) {
+          reconnectTimer = setTimeout(connect, 3000);
+        }
       }
     }
 
@@ -314,13 +461,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (socket) socket.close();
     };
-  }, []);
+  }, [effectiveOnline]);
 
   // Central event dispatcher for real-time synchronization
   function handleIncomingEvent(type: string, payload: any) {
     switch (type) {
       case 'INIT_STATE':
         setState((prev) => ({ ...prev, ...payload }));
+        if (payload.tasks) saveAllTasksToDb(payload.tasks).catch(console.warn);
+        if (payload.inventory) saveAllInventoryToDb(payload.inventory).catch(console.warn);
+        if (payload.inventoryMovements) saveAllInventoryMovementsToDb(payload.inventoryMovements).catch(console.warn);
+        setDbMetadata('lastOnlineSync', new Date().toISOString()).catch(console.warn);
+        setLastSyncTimestamp(new Date().toISOString());
         break;
 
       case 'TASK_CREATED':
@@ -328,6 +480,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           ...prev,
           tasks: [payload, ...prev.tasks.filter((t) => t.id !== payload.id)],
         }));
+        saveTaskToDb(payload).catch(console.warn);
         showPushAlert('Task Created', payload.title);
         break;
 
@@ -336,6 +489,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           ...prev,
           tasks: prev.tasks.map((t) => (t.id === payload.id ? { ...t, ...payload } : t)),
         }));
+        saveTaskToDb(payload).catch(console.warn);
         break;
 
       case 'TASK_DELETED':
@@ -343,6 +497,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           ...prev,
           tasks: prev.tasks.filter((t) => t.id !== payload),
         }));
+        deleteTaskFromDb(payload).catch(console.warn);
         break;
 
       case 'TASKS_PRIORITIZED':
@@ -417,6 +572,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           ),
           inventoryMovements: [payload.movement, ...prev.inventoryMovements],
         }));
+        if (payload.item) saveInventoryItemToDb(payload.item).catch(console.warn);
+        if (payload.movement) saveInventoryMovementToDb(payload.movement).catch(console.warn);
         break;
 
       case 'INVENTORY_ITEM_CREATED':
@@ -424,6 +581,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           ...prev,
           inventory: [...prev.inventory, payload],
         }));
+        saveInventoryItemToDb(payload).catch(console.warn);
         break;
 
       case 'WORKORDER_UPDATED':
@@ -516,6 +674,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (currentUser.id === payload.id) {
           setCurrentUser((prev) => ({ ...prev, ...payload }));
         }
+        break;
+
+      case 'USER_DELETED':
+        setState((prev) => {
+          const filtered = prev.users.filter((u) => u.id !== payload);
+          return {
+            ...prev,
+            users: filtered,
+            subscription: {
+              ...prev.subscription,
+              seatsUsed: Math.max(1, filtered.length),
+            },
+          };
+        });
+        showPushAlert('User Account Removed', 'User account removed from workspace.');
         break;
 
       case 'SUBSCRIPTION_UPDATED':
@@ -623,18 +796,66 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updatedAt: new Date().toISOString(),
     };
 
-    emit('TASK_CREATE', newTask);
     handleIncomingEvent('TASK_CREATED', newTask);
+    saveTaskToDb(newTask).catch(console.warn);
+
+    if (effectiveOnline && isSocketConnected) {
+      emit('TASK_CREATE', newTask);
+    } else {
+      queueOfflineMutation({
+        type: 'TASK_CREATE',
+        payload: newTask,
+      })
+        .then(() => {
+          setPendingOfflineMutationsCount((c) => c + 1);
+          setSyncStatus('offline');
+          showPushAlert('Task Saved Offline', `"${newTask.title}" saved in IndexedDB.`);
+        })
+        .catch(console.warn);
+    }
   };
 
   const updateTask = (task: Partial<Task> & { id: string }) => {
-    emit('TASK_UPDATE', task);
     handleIncomingEvent('TASK_UPDATED', task);
+    const existing = state.tasks.find((t) => t.id === task.id);
+    if (existing) {
+      saveTaskToDb({ ...existing, ...task, updatedAt: new Date().toISOString() }).catch(console.warn);
+    }
+
+    if (effectiveOnline && isSocketConnected) {
+      emit('TASK_UPDATE', task);
+    } else {
+      queueOfflineMutation({
+        type: 'TASK_UPDATE',
+        payload: task,
+      })
+        .then(() => {
+          setPendingOfflineMutationsCount((c) => c + 1);
+          setSyncStatus('offline');
+          showPushAlert('Task Updated Offline', 'Changes saved to IndexedDB.');
+        })
+        .catch(console.warn);
+    }
   };
 
   const deleteTask = (taskId: string) => {
-    emit('TASK_DELETE', { id: taskId });
     handleIncomingEvent('TASK_DELETED', taskId);
+    deleteTaskFromDb(taskId).catch(console.warn);
+
+    if (effectiveOnline && isSocketConnected) {
+      emit('TASK_DELETE', { id: taskId });
+    } else {
+      queueOfflineMutation({
+        type: 'TASK_DELETE',
+        payload: { id: taskId },
+      })
+        .then(() => {
+          setPendingOfflineMutationsCount((c) => c + 1);
+          setSyncStatus('offline');
+          showPushAlert('Task Deleted Offline', 'Task deletion stored in IndexedDB.');
+        })
+        .catch(console.warn);
+    }
   };
 
   const sendMessage = (
@@ -708,16 +929,76 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const adjustInventory = (payload: {
     itemId: string;
-    type: InventoryMovement['type'];
+    type: MovementType;
     quantity: number;
     referenceOrder?: string;
     performedBy?: string;
     notes?: string;
   }) => {
-    emit('INVENTORY_ADJUST', {
-      ...payload,
-      performedBy: payload.performedBy || currentUser.name,
-    });
+    const item = state.inventory.find((i) => i.id === payload.itemId);
+    if (item) {
+      const prevQty = item.quantity;
+      let newQty = prevQty;
+      if (payload.type === 'stock_in' || payload.type === 'audit_adjustment') {
+        newQty += payload.quantity;
+      } else if (payload.type === 'stock_out' || payload.type === 'waste' || payload.type === 'transfer') {
+        newQty = Math.max(0, newQty - payload.quantity);
+      }
+
+      const newStatus: InventoryStatus =
+        newQty === 0
+          ? 'out_of_stock'
+          : newQty <= item.minThreshold
+          ? 'low_stock'
+          : 'in_stock';
+
+      const updatedItem: InventoryItem = {
+        ...item,
+        quantity: newQty,
+        status: newStatus,
+        lastAudited: new Date().toISOString().split('T')[0],
+      };
+
+      const newMovement: InventoryMovement = {
+        id: `mov-${Date.now()}`,
+        itemId: item.id,
+        itemName: item.name,
+        sku: item.sku,
+        type: payload.type,
+        quantity: payload.quantity,
+        previousQuantity: prevQty,
+        newQuantity: newQty,
+        performedBy: payload.performedBy || currentUser.name,
+        timestamp: new Date().toISOString(),
+        referenceOrder: payload.referenceOrder || 'ADJ-MANUAL',
+        notes: payload.notes || 'Manual stock adjustment',
+      };
+
+      handleIncomingEvent('INVENTORY_UPDATED', { item: updatedItem, movement: newMovement });
+      saveInventoryItemToDb(updatedItem).catch(console.warn);
+      saveInventoryMovementToDb(newMovement).catch(console.warn);
+    }
+
+    if (effectiveOnline && isSocketConnected) {
+      emit('INVENTORY_ADJUST', {
+        ...payload,
+        performedBy: payload.performedBy || currentUser.name,
+      });
+    } else {
+      queueOfflineMutation({
+        type: 'INVENTORY_ADJUST',
+        payload: {
+          ...payload,
+          performedBy: payload.performedBy || currentUser.name,
+        },
+      })
+        .then(() => {
+          setPendingOfflineMutationsCount((c) => c + 1);
+          setSyncStatus('offline');
+          showPushAlert('Inventory Adjusted Offline', 'Stock update stored in IndexedDB.');
+        })
+        .catch(console.warn);
+    }
   };
 
   const createInventoryItem = (item: Partial<InventoryItem>) => {
@@ -739,8 +1020,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       supplierName: item.supplierName || 'Global Supply Corp',
     };
 
-    emit('INVENTORY_ITEM_CREATE', newItem);
     handleIncomingEvent('INVENTORY_ITEM_CREATED', newItem);
+    saveInventoryItemToDb(newItem).catch(console.warn);
+
+    if (effectiveOnline && isSocketConnected) {
+      emit('INVENTORY_ITEM_CREATE', newItem);
+    } else {
+      queueOfflineMutation({
+        type: 'INVENTORY_ITEM_CREATE',
+        payload: newItem,
+      })
+        .then(() => {
+          setPendingOfflineMutationsCount((c) => c + 1);
+          setSyncStatus('offline');
+          showPushAlert('Item Stored Offline', `${newItem.name} saved in IndexedDB.`);
+        })
+        .catch(console.warn);
+    }
   };
 
   const updateWorkOrder = (wo: Partial<ProductionWorkOrder> & { id: string }) => {
@@ -869,6 +1165,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setAiPrioritization(data.result);
         if (data.tasks) {
           setState((prev) => ({ ...prev, tasks: data.tasks }));
+          saveAllTasksToDb(data.tasks).catch(console.warn);
         }
         showPushAlert('AI Prioritization Complete', 'Tasks reordered by critical path, deadlines & dependencies.');
       }
@@ -892,6 +1189,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (data.success) {
         if (data.tasks) {
           setState((prev) => ({ ...prev, tasks: data.tasks }));
+          saveAllTasksToDb(data.tasks).catch(console.warn);
         }
         if (data.result) {
           setAiPrioritization(data.result);
@@ -902,6 +1200,120 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       console.error('Failed to load example scenario:', err);
     } finally {
       setIsPrioritizing(false);
+    }
+  };
+
+  // Offline Synchronization & Simulation Controls
+  const toggleOfflineSimulation = () => {
+    setIsOfflineSimulated((prev) => {
+      const next = !prev;
+      if (next) {
+        setSyncStatus('offline');
+        showPushAlert('Offline Mode Simulated', 'Disconnected from network. Using local IndexedDB store.');
+      } else {
+        setSyncStatus('syncing');
+        showPushAlert('Reconnected', 'Network connection restored. Syncing IndexedDB changes...');
+        setTimeout(() => {
+          syncOfflineQueue();
+        }, 300);
+      }
+      return next;
+    });
+  };
+
+  const setOfflineSimulation = (sim: boolean) => {
+    setIsOfflineSimulated(sim);
+    if (sim) {
+      setSyncStatus('offline');
+      showPushAlert('Offline Mode Simulated', 'Disconnected from network. Using local IndexedDB store.');
+    } else {
+      setSyncStatus('syncing');
+      showPushAlert('Reconnected', 'Network connection restored. Syncing IndexedDB changes...');
+      setTimeout(() => {
+        syncOfflineQueue();
+      }, 300);
+    }
+  };
+
+  const syncOfflineQueue = async () => {
+    if (!effectiveOnline) {
+      showPushAlert('Offline Mode Active', 'Cannot sync while offline or simulated offline.');
+      return;
+    }
+
+    setSyncStatus('syncing');
+
+    try {
+      const pendingMutations = await getPendingMutationsFromDb();
+      if (pendingMutations.length > 0) {
+        const res = await fetch('/api/sync/offline-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mutations: pendingMutations }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            // Delete synced mutations
+            await Promise.all(pendingMutations.map((m) => removeMutationFromDb(m.id)));
+            setPendingOfflineMutationsCount(0);
+
+            if (data.tasks) {
+              setState((prev) => ({
+                ...prev,
+                tasks: data.tasks,
+                inventory: data.inventory || prev.inventory,
+                inventoryMovements: data.inventoryMovements || prev.inventoryMovements,
+              }));
+              await saveAllTasksToDb(data.tasks);
+            }
+            if (data.inventory) {
+              await saveAllInventoryToDb(data.inventory);
+            }
+            if (data.inventoryMovements) {
+              await saveAllInventoryMovementsToDb(data.inventoryMovements);
+            }
+
+            const nowIso = new Date().toISOString();
+            await setDbMetadata('lastOnlineSync', nowIso);
+            setLastSyncTimestamp(nowIso);
+            setSyncStatus('synced');
+            showPushAlert(
+              'Sync Completed',
+              `Successfully synchronized ${data.processedCount} offline mutation(s) with the server.`
+            );
+            return;
+          }
+        }
+      }
+
+      // If no mutations, refresh state from server
+      const stateRes = await fetch('/api/state').catch(() => null);
+      if (stateRes && stateRes.ok) {
+        const data = await stateRes.json();
+        if (data.success && data.state) {
+          setState((prev) => ({
+            ...prev,
+            tasks: data.state.tasks,
+            inventory: data.state.inventory,
+            inventoryMovements: data.state.inventoryMovements,
+          }));
+          await Promise.all([
+            saveAllTasksToDb(data.state.tasks),
+            saveAllInventoryToDb(data.state.inventory),
+            saveAllInventoryMovementsToDb(data.state.inventoryMovements),
+            setDbMetadata('lastOnlineSync', new Date().toISOString()),
+          ]);
+          setLastSyncTimestamp(new Date().toISOString());
+        }
+      }
+
+      setPendingOfflineMutationsCount(0);
+      setSyncStatus('synced');
+    } catch (err) {
+      console.error('Failed to sync offline queue:', err);
+      setSyncStatus('error');
     }
   };
 
@@ -976,6 +1388,39 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setCurrentUser((prev) => ({ ...prev, ...updates }));
     }
     emit('USER_UPDATE', { id: userId, ...updates });
+
+    fetch(`/api/users/${userId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch((e) => console.warn('User update REST error:', e));
+  };
+
+  const deleteUserAccount = (userId: string) => {
+    if (userId === currentUser.id) {
+      showPushAlert('Action Restricted', 'Cannot decommission your own currently active administrator session.');
+      return;
+    }
+
+    setState((prev) => {
+      const remaining = prev.users.filter((u) => u.id !== userId);
+      return {
+        ...prev,
+        users: remaining,
+        subscription: {
+          ...prev.subscription,
+          seatsUsed: Math.max(1, remaining.length),
+        },
+      };
+    });
+
+    emit('USER_DELETE', { id: userId });
+
+    fetch(`/api/users/${userId}`, {
+      method: 'DELETE',
+    }).catch((e) => console.warn('User delete REST error:', e));
+
+    showPushAlert('User Decommissioned', 'User account and credentials revoked.');
   };
 
   // Subscription & Payment Methods Actions
@@ -1143,8 +1588,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isSocketConnected,
         pushEnabled,
         setPushEnabled,
+        showPushAlert,
         notificationDrawerOpen,
         setNotificationDrawerOpen,
+        isOnline,
+        isOfflineSimulated,
+        effectiveOnline,
+        toggleOfflineSimulation,
+        setOfflineSimulation,
+        isIndexedDbReady,
+        syncStatus,
+        pendingOfflineMutationsCount,
+        lastSyncTimestamp,
+        syncOfflineQueue,
+        offlineStatsModalOpen,
+        setOfflineStatsModalOpen,
         isCreateAccountOpen,
         setIsCreateAccountOpen,
         isUpgradeModalOpen,
@@ -1156,6 +1614,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         createUserAccount,
         switchUser,
         updateUserProfile,
+        deleteUserAccount,
         upgradeSubscription,
         addPaymentMethod,
         removePaymentMethod,

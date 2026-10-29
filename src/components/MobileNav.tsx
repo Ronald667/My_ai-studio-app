@@ -13,6 +13,7 @@ import {
   Cloud,
   BarChart3,
   CreditCard,
+  Users,
 } from 'lucide-react';
 
 export const MobileNav: React.FC = () => {
@@ -33,6 +34,7 @@ export const MobileNav: React.FC = () => {
     { id: 'cloud', label: t.navCloud, icon: Cloud },
     { id: 'analytics', label: t.navAnalytics, icon: BarChart3 },
     { id: 'billing', label: t.navBilling, icon: CreditCard },
+    { id: 'users', label: t.navUsers, icon: Users },
   ];
 
   return (
