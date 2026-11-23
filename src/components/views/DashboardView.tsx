@@ -1,6 +1,7 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { AITaskPrioritizationCard } from '../AITaskPrioritizationCard';
+import { TeamResourceHeatmap } from '../TeamResourceHeatmap';
 import {
   CheckCircle2,
   Clock,
@@ -228,6 +229,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* AI-Powered Task Prioritization & Optimal Operations Schedule */}
       <AITaskPrioritizationCard />
+
+      {/* D3 Team Resource Heatmap for Workload Distribution & Rebalancing */}
+      <TeamResourceHeatmap />
 
       {/* Main Grid: Projects Status & Real-time Operations Stream */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
