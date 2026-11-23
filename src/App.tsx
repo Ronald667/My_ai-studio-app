@@ -27,6 +27,7 @@ import { CreateAccountModal } from './components/modals/CreateAccountModal';
 import { UpgradePlanModal } from './components/modals/UpgradePlanModal';
 import { AddPaymentMethodModal } from './components/modals/AddPaymentMethodModal';
 import { InvoiceDetailsModal } from './components/modals/InvoiceDetailsModal';
+import { CreateProjectFromTemplateModal } from './components/modals/CreateProjectFromTemplateModal';
 
 const AppContent: React.FC = () => {
   const { currentTab } = useApp();
@@ -102,6 +103,7 @@ const AppContent: React.FC = () => {
       <UpgradePlanModal />
       <AddPaymentMethodModal />
       <InvoiceDetailsModal />
+      <CreateProjectFromTemplateModal />
     </div>
   );
 };

@@ -45,6 +45,8 @@ import {
   BillingInterval,
   PaymentMethod,
   BillingInvoice,
+  ProjectTemplate,
+  ProjectMilestone,
 } from '../types';
 import {
   initialUsers,
@@ -61,6 +63,7 @@ import {
   initialComplianceRecords,
   initialCloudFiles,
   initialSubscription,
+  initialProjectTemplates,
 } from '../initialData';
 import { Language, translations, Translations } from '../i18n';
 
@@ -203,6 +206,34 @@ interface AppContextType {
   prioritizeTasks: () => Promise<void>;
   loadExampleScenario: (scenarioId: string) => Promise<void>;
   selectedScenarioId: string;
+
+  // Project Templates & Project Creation from Templates
+  isNewProjectModalOpen: boolean;
+  setIsNewProjectModalOpen: (open: boolean) => void;
+  preselectedTemplateId: string | null;
+  openNewProjectFromTemplate: (templateId?: string | null) => void;
+  createProjectTemplate: (
+    template: Omit<ProjectTemplate, 'id' | 'usageCount' | 'updatedAt' | 'createdBy'>
+  ) => ProjectTemplate;
+  updateProjectTemplate: (template: ProjectTemplate) => void;
+  deleteProjectTemplate: (templateId: string) => void;
+  createProjectFromTemplate: (payload: {
+    project: {
+      name: string;
+      code: string;
+      clientOrDept: string;
+      startDate: string;
+      targetDate: string;
+      budget: number;
+      managerId: string;
+      description: string;
+      templateId?: string;
+      templateName?: string;
+    };
+    tasks: Array<Partial<Task>>;
+    milestones: ProjectMilestone[];
+  }) => Project;
+  toggleProjectMilestone: (projectId: string, milestoneId: string) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -246,6 +277,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     currentUser: initialUsers[0],
     tasks: initialTasks,
     projects: initialProjects,
+    projectTemplates: initialProjectTemplates,
     chatMessages: initialMessages,
     chatChannels: initialChannels,
     documents: initialDocuments,
@@ -265,6 +297,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [isAddPaymentMethodOpen, setIsAddPaymentMethodOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<BillingInvoice | null>(null);
+  const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
+  const [preselectedTemplateId, setPreselectedTemplateId] = useState<string | null>(null);
 
   // Offline & IndexedDB Synchronization State
   const [isOnline, setIsOnline] = useState<boolean>(
@@ -697,6 +731,65 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           subscription: payload,
         }));
         showPushAlert('Subscription Updated', `Workspace updated to ${payload.currentPlan.toUpperCase()} tier.`);
+        break;
+
+      case 'PROJECT_TEMPLATE_CREATED':
+        setState((prev) => ({
+          ...prev,
+          projectTemplates: [
+            payload,
+            ...prev.projectTemplates.filter((tpl) => tpl.id !== payload.id),
+          ],
+        }));
+        break;
+
+      case 'PROJECT_TEMPLATE_UPDATED':
+        setState((prev) => ({
+          ...prev,
+          projectTemplates: prev.projectTemplates.map((tpl) =>
+            tpl.id === payload.id ? { ...tpl, ...payload } : tpl
+          ),
+        }));
+        break;
+
+      case 'PROJECT_TEMPLATE_DELETED':
+        setState((prev) => ({
+          ...prev,
+          projectTemplates: prev.projectTemplates.filter((tpl) => tpl.id !== payload),
+        }));
+        break;
+
+      case 'PROJECT_CREATED_WITH_TASKS': {
+        const { project, tasks: newTasks } = payload as {
+          project: Project;
+          tasks: Task[];
+        };
+        setState((prev) => ({
+          ...prev,
+          projects: project
+            ? [project, ...prev.projects.filter((p) => p.id !== project.id)]
+            : prev.projects,
+          tasks:
+            Array.isArray(newTasks) && newTasks.length > 0
+              ? [
+                  ...newTasks,
+                  ...prev.tasks.filter((t) => !newTasks.some((nt) => nt.id === t.id)),
+                ]
+              : prev.tasks,
+        }));
+        if (Array.isArray(newTasks)) {
+          newTasks.forEach((nt) => saveTaskToDb(nt).catch(console.warn));
+        }
+        break;
+      }
+
+      case 'PROJECT_MILESTONE_UPDATED':
+        setState((prev) => ({
+          ...prev,
+          projects: prev.projects.map((p) =>
+            p.id === payload.projectId ? { ...p, milestones: payload.milestones } : p
+          ),
+        }));
         break;
     }
   }
@@ -1569,6 +1662,156 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     showPushAlert('Default Payment Updated', 'Default billing payment method updated.');
   };
 
+  // Project Templates & Template-Driven Project Creation
+  const openNewProjectFromTemplate = (templateId: string | null = null) => {
+    setPreselectedTemplateId(templateId);
+    setIsNewProjectModalOpen(true);
+  };
+
+  const createProjectTemplate = (
+    template: Omit<ProjectTemplate, 'id' | 'usageCount' | 'updatedAt' | 'createdBy'>
+  ): ProjectTemplate => {
+    const newTpl: ProjectTemplate = {
+      ...template,
+      id: `tpl-${Date.now()}`,
+      usageCount: 0,
+      createdBy: currentUser.name,
+      updatedAt: new Date().toISOString(),
+    };
+
+    handleIncomingEvent('PROJECT_TEMPLATE_CREATED', newTpl);
+    emit('PROJECT_TEMPLATE_CREATE', newTpl);
+    showPushAlert('Template Saved', `"${newTpl.name}" template is ready for team use.`);
+    return newTpl;
+  };
+
+  const updateProjectTemplate = (template: ProjectTemplate) => {
+    const updated: ProjectTemplate = {
+      ...template,
+      updatedAt: new Date().toISOString(),
+    };
+    handleIncomingEvent('PROJECT_TEMPLATE_UPDATED', updated);
+    emit('PROJECT_TEMPLATE_UPDATE', updated);
+    showPushAlert('Template Updated', `"${updated.name}" blueprint updated.`);
+  };
+
+  const deleteProjectTemplate = (templateId: string) => {
+    handleIncomingEvent('PROJECT_TEMPLATE_DELETED', templateId);
+    emit('PROJECT_TEMPLATE_DELETE', { id: templateId });
+    showPushAlert('Template Removed', 'Project template removed from catalog.');
+  };
+
+  const createProjectFromTemplate: AppContextType['createProjectFromTemplate'] = ({
+    project,
+    tasks: templateTasks,
+    milestones,
+  }) => {
+    const projId = `proj-${Date.now()}`;
+    const manager = state.users.find((u) => u.id === project.managerId) || currentUser;
+    const nowIso = new Date().toISOString();
+
+    const createdTasks: Task[] = templateTasks.map((t, index) => {
+      const assignee =
+        state.users.find((u) => u.id === t.assigneeId) ||
+        state.users.find((u) => u.id === project.managerId) ||
+        currentUser;
+      return {
+        id: `task-${Date.now()}-${index}`,
+        title: t.title || `Task ${index + 1}`,
+        description: t.description || '',
+        projectId: projId,
+        projectName: project.name,
+        assigneeId: assignee.id,
+        assigneeName: assignee.name,
+        assigneeAvatar: assignee.avatar,
+        priority: t.priority || 'medium',
+        status: t.status || 'todo',
+        dueDate: t.dueDate || project.targetDate,
+        estimatedHours: Number(t.estimatedHours) || 8,
+        loggedHours: 0,
+        tags: t.tags && t.tags.length > 0 ? t.tags : ['Project'],
+        subtasks: (t.subtasks || []).map((st, sIdx) => ({
+          id: `sub-${Date.now()}-${index}-${sIdx}`,
+          title: typeof st === 'string' ? st : st.title,
+          completed: false,
+        })),
+        attachments: [],
+        hipaaPhiSensitive: Boolean(t.hipaaPhiSensitive),
+        dependencies: [],
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+    });
+
+    const newProject: Project = {
+      id: projId,
+      name: project.name,
+      code: project.code.toUpperCase(),
+      clientOrDept: project.clientOrDept || 'Internal Operations',
+      startDate: project.startDate,
+      targetDate: project.targetDate,
+      status: 'on_track',
+      budget: Number(project.budget) || 0,
+      spent: 0,
+      progress: 0,
+      managerId: manager.id,
+      managerName: manager.name,
+      description: project.description || '',
+      tasksCount: createdTasks.length,
+      completedTasksCount: 0,
+      milestones,
+      templateId: project.templateId,
+      templateName: project.templateName,
+    };
+
+    handleIncomingEvent('PROJECT_CREATED_WITH_TASKS', {
+      project: newProject,
+      tasks: createdTasks,
+    });
+
+    if (project.templateId) {
+      setState((prev) => ({
+        ...prev,
+        projectTemplates: prev.projectTemplates.map((tpl) =>
+          tpl.id === project.templateId
+            ? { ...tpl, usageCount: (tpl.usageCount || 0) + 1 }
+            : tpl
+        ),
+      }));
+    }
+
+    if (effectiveOnline && isSocketConnected) {
+      emit('PROJECT_CREATE_FROM_TEMPLATE', {
+        project: newProject,
+        tasks: createdTasks,
+      });
+    } else {
+      createdTasks.forEach((nt) => {
+        queueOfflineMutation({ type: 'TASK_CREATE', payload: nt }).catch(console.warn);
+      });
+    }
+
+    showPushAlert(
+      'Project Created',
+      `"${newProject.name}" launched with ${createdTasks.length} tasks and ${milestones.length} milestones.`
+    );
+    return newProject;
+  };
+
+  const toggleProjectMilestone = (projectId: string, milestoneId: string) => {
+    setState((prev) => ({
+      ...prev,
+      projects: prev.projects.map((p) => {
+        if (p.id !== projectId || !p.milestones) return p;
+        const updatedMilestones = p.milestones.map((m) =>
+          m.id === milestoneId ? { ...m, completed: !m.completed } : m
+        );
+        return { ...p, milestones: updatedMilestones };
+      }),
+    }));
+    emit('PROJECT_MILESTONE_TOGGLE', { projectId, milestoneId });
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -1648,6 +1891,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         prioritizeTasks,
         loadExampleScenario,
         selectedScenarioId,
+        isNewProjectModalOpen,
+        setIsNewProjectModalOpen,
+        preselectedTemplateId,
+        openNewProjectFromTemplate,
+        createProjectTemplate,
+        updateProjectTemplate,
+        deleteProjectTemplate,
+        createProjectFromTemplate,
+        toggleProjectMilestone,
       }}
     >
       {children}

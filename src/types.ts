@@ -79,6 +79,16 @@ export interface AIPrioritizationResult {
 
 export type ProjectHealth = 'on_track' | 'at_risk' | 'delayed' | 'completed';
 
+export interface ProjectMilestone {
+  id: string;
+  title: string;
+  description?: string;
+  targetDate: string;
+  completed: boolean;
+  ownerId?: string;
+  ownerName?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -95,6 +105,54 @@ export interface Project {
   description: string;
   tasksCount: number;
   completedTasksCount: number;
+  milestones?: ProjectMilestone[];
+  templateId?: string;
+  templateName?: string;
+}
+
+export type ProjectTemplateCategory =
+  | 'Client Onboarding'
+  | 'Software Release'
+  | 'Compliance Audit'
+  | 'Manufacturing Launch'
+  | 'Custom';
+
+export interface TemplateTaskDefinition {
+  id: string;
+  title: string;
+  description: string;
+  priority: TaskPriority;
+  startOffsetDays: number;
+  estimatedDurationDays: number;
+  estimatedHours: number;
+  defaultAssigneeId: string;
+  milestoneRefId?: string;
+  tags: string[];
+  hipaaPhiSensitive?: boolean;
+  subtasks: string[];
+}
+
+export interface TemplateMilestoneDefinition {
+  id: string;
+  title: string;
+  description: string;
+  targetOffsetDays: number;
+  ownerId?: string;
+}
+
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  category: ProjectTemplateCategory;
+  description: string;
+  defaultDurationDays: number;
+  defaultBudget: number;
+  defaultManagerId: string;
+  tasks: TemplateTaskDefinition[];
+  milestones: TemplateMilestoneDefinition[];
+  usageCount: number;
+  createdBy: string;
+  updatedAt: string;
 }
 
 export interface ChatMessage {
@@ -363,6 +421,7 @@ export interface AppGlobalState {
   currentUser: User;
   tasks: Task[];
   projects: Project[];
+  projectTemplates: ProjectTemplate[];
   chatMessages: ChatMessage[];
   chatChannels: ChatChannel[];
   documents: DocumentItem[];

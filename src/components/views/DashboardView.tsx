@@ -15,6 +15,7 @@ import {
   FileCheck2,
   Lock,
   Sparkles,
+  FolderPlus,
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -28,7 +29,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenStockAdjust,
   onOpenNewWorkOrder,
 }) => {
-  const { t, state, setCurrentTab, simulateWorkflowTrigger } = useApp();
+  const { t, state, setCurrentTab, simulateWorkflowTrigger, openNewProjectFromTemplate } = useApp();
 
   const activeTasks = state.tasks.filter((t) => t.status !== 'done');
   const completedTasks = state.tasks.filter((t) => t.status === 'done');
@@ -59,10 +60,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Quick Command Actions */}
         <div className="flex flex-wrap items-center gap-2">
           <button
+            id="quick-new-project-btn"
+            type="button"
+            onClick={() => openNewProjectFromTemplate()}
+            className="flex items-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3.5 py-2 text-xs font-medium text-slate-200 whitespace-nowrap shrink-0 transition-colors"
+          >
+            <FolderPlus className="h-4 w-4 text-indigo-400" />
+            <span>New Project</span>
+          </button>
+          <button
             id="quick-add-task-btn"
             type="button"
             onClick={onOpenNewTask}
-            className="flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-3.5 py-2 text-xs font-semibold text-white shadow-md shadow-indigo-600/30 transition-colors"
+            className="flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-3.5 py-2 text-xs font-semibold text-white shadow-md shadow-indigo-600/30 whitespace-nowrap shrink-0 transition-colors"
           >
             <Plus className="h-4 w-4" />
             <span>{t.addTask}</span>
@@ -71,7 +81,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             id="quick-stock-adjust-btn"
             type="button"
             onClick={onOpenStockAdjust}
-            className="flex items-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3.5 py-2 text-xs font-medium text-slate-200 transition-colors"
+            className="flex items-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3.5 py-2 text-xs font-medium text-slate-200 whitespace-nowrap shrink-0 transition-colors"
           >
             <Boxes className="h-4 w-4 text-amber-400" />
             <span>{t.stockMovement}</span>
@@ -80,7 +90,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             id="quick-work-order-btn"
             type="button"
             onClick={onOpenNewWorkOrder}
-            className="flex items-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3.5 py-2 text-xs font-medium text-slate-200 transition-colors"
+            className="flex items-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3.5 py-2 text-xs font-medium text-slate-200 whitespace-nowrap shrink-0 transition-colors"
           >
             <FileCheck2 className="h-4 w-4 text-cyan-400" />
             <span>Work Order</span>
@@ -224,7 +234,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Left 2 Cols: Projects & Milestones */}
         <div className="lg:col-span-2 space-y-6">
           <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between gap-2 mb-4">
               <div>
                 <h2 className="font-bold text-sm text-slate-900 dark:text-slate-100">
                   {t.projects}
@@ -233,13 +243,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   Cross-functional milestones & deadline burn-down
                 </p>
               </div>
-              <button
-                onClick={() => setCurrentTab('tasks')}
-                className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-medium"
-              >
-                <span>View all tasks</span>
-                <ArrowUpRight className="h-3.5 w-3.5" />
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => openNewProjectFromTemplate()}
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-medium whitespace-nowrap shrink-0"
+                >
+                  <FolderPlus className="h-3.5 w-3.5" />
+                  <span>From Template</span>
+                </button>
+                <button
+                  onClick={() => setCurrentTab('tasks')}
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-medium whitespace-nowrap shrink-0"
+                >
+                  <span>View all tasks</span>
+                  <ArrowUpRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
 
             <div className="space-y-3.5">

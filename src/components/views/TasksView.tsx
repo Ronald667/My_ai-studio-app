@@ -21,18 +21,29 @@ import {
   Sparkles,
   Zap,
   BarChart2,
+  Layers,
+  Flag,
+  FolderPlus,
 } from 'lucide-react';
 import { AITaskPrioritizationCard } from '../AITaskPrioritizationCard';
 import { GanttChart } from '../GanttChart';
+import { ProjectTemplatesView } from './ProjectTemplatesView';
 
 interface TasksViewProps {
   onOpenNewTask: () => void;
 }
 
 export const TasksView: React.FC<TasksViewProps> = ({ onOpenNewTask }) => {
-  const { t, state, updateTask, deleteTask, currentUser, hasPermission } = useApp();
+  const {
+    t,
+    state,
+    updateTask,
+    deleteTask,
+    openNewProjectFromTemplate,
+    toggleProjectMilestone,
+  } = useApp();
 
-  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'gantt' | 'timeline' | 'ai_prioritized'>('kanban');
+  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'gantt' | 'timeline' | 'ai_prioritized' | 'templates'>('kanban');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProject, setSelectedProject] = useState<string>('all');
   const [selectedPriority, setSelectedPriority] = useState<string>('all');
@@ -146,7 +157,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenNewTask }) => {
             <button
               id="tasks-ai-prioritized-tab-btn"
               onClick={() => setViewMode('ai_prioritized')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium whitespace-nowrap shrink-0 transition-colors ${
                 viewMode === 'ai_prioritized'
                   ? 'bg-indigo-600 text-white shadow-xs'
                   : 'text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 font-semibold'
@@ -155,13 +166,36 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenNewTask }) => {
               <Sparkles className="h-3.5 w-3.5 text-indigo-400 animate-pulse" />
               <span>AI Operations Order</span>
             </button>
+            <button
+              id="tasks-templates-tab-btn"
+              onClick={() => setViewMode('templates')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium whitespace-nowrap shrink-0 transition-colors ${
+                viewMode === 'templates'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              <Layers className="h-3.5 w-3.5" />
+              <span>Templates ({state.projectTemplates.length})</span>
+            </button>
           </div>
+
+          {/* New Project from Template Button */}
+          <button
+            id="open-new-project-template-modal-btn"
+            type="button"
+            onClick={() => openNewProjectFromTemplate()}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap shrink-0 shadow-xs transition-colors"
+          >
+            <FolderPlus className="h-4 w-4 text-indigo-500" />
+            <span>New Project</span>
+          </button>
 
           {/* Add Task Button */}
           <button
             id="open-new-task-modal-btn"
             onClick={onOpenNewTask}
-            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors"
+            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white whitespace-nowrap shrink-0 shadow-sm transition-colors"
           >
             <Plus className="h-4 w-4" />
             <span>{t.addTask}</span>
@@ -169,7 +203,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenNewTask }) => {
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
+      {/* Filter and Search Bar (hidden on templates view which has its own filter bar) */}
+      {viewMode !== 'templates' && (
       <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
@@ -215,6 +250,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenNewTask }) => {
           </select>
         </div>
       </div>
+      )}
 
       {/* VIEW 1: KANBAN BOARD */}
       {viewMode === 'kanban' && (
@@ -496,6 +532,10 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenNewTask }) => {
           <AITaskPrioritizationCard />
         </div>
       )}
+
+      {/* VIEW 5: PROJECT TEMPLATES */}
+      {viewMode === 'templates' && <ProjectTemplatesView />}
+
       {viewMode === 'timeline' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between p-3 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/50">
@@ -513,16 +553,29 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenNewTask }) => {
             </button>
           </div>
           <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs">
-            <h2 className="font-semibold text-sm text-slate-900 dark:text-slate-100 mb-1">
-              Project Milestone Timeline & Deadline Matrix
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-              Real-time countdown tracking across multi-quarter milestones
-            </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <div>
+                <h2 className="font-semibold text-sm text-slate-900 dark:text-slate-100 mb-1">
+                  Project Milestone Timeline & Deadline Matrix
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Real-time countdown tracking across multi-quarter milestones and template-launched projects
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => openNewProjectFromTemplate()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold whitespace-nowrap shrink-0 transition-colors"
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+                <span>Launch Project from Template</span>
+              </button>
+            </div>
 
             <div className="space-y-4">
               {state.projects.map((proj) => {
                 const projTasks = state.tasks.filter((t) => t.projectId === proj.id);
+                const projMilestones = proj.milestones || [];
                 return (
                   <div
                     key={proj.id}
@@ -530,25 +583,75 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenNewTask }) => {
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-xs text-slate-900 dark:text-slate-100">
                             {proj.name}
                           </span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500">
+                          <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                            {proj.code}
+                          </span>
+                          <span className="text-[11px] font-mono text-indigo-600 dark:text-indigo-400">
                             Deadline: {proj.targetDate}
                           </span>
+                          {proj.templateName && (
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                              · Template: {proj.templateName}
+                            </span>
+                          )}
                         </div>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                           {proj.description}
                         </p>
                       </div>
-                      <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                      <span className="text-xs font-semibold font-mono tabular-nums text-indigo-600 dark:text-indigo-400">
                         {proj.progress}% Complete
                       </span>
                     </div>
 
+                    {/* Project Milestones Gates */}
+                    {projMilestones.length > 0 && (
+                      <div className="mb-3 pt-2 border-t border-slate-200/70 dark:border-slate-800 space-y-1.5">
+                        <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                          <Flag className="h-3 w-3 text-indigo-500" />
+                          <span>Milestones ({projMilestones.filter((m) => m.completed).length}/{projMilestones.length})</span>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {projMilestones.map((ms) => (
+                            <button
+                              key={ms.id}
+                              type="button"
+                              onClick={() => toggleProjectMilestone(proj.id, ms.id)}
+                              className="text-left p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600 flex items-center justify-between gap-2 text-xs transition-colors"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <CheckCircle2
+                                  className={`h-4 w-4 shrink-0 ${
+                                    ms.completed
+                                      ? 'text-emerald-500'
+                                      : 'text-slate-300 dark:text-slate-600'
+                                  }`}
+                                />
+                                <span
+                                  className={`truncate font-medium ${
+                                    ms.completed
+                                      ? 'line-through text-slate-400'
+                                      : 'text-slate-800 dark:text-slate-200'
+                                  }`}
+                                >
+                                  {ms.title}
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
+                                {ms.targetDate}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Timeline Task Blocks */}
-                    <div className="space-y-2 mt-3 pl-2 border-l-2 border-indigo-500/30">
+                    <div className="space-y-2 mt-3 pl-3 border-l border-slate-200 dark:border-slate-800">
                       {projTasks.map((t) => {
                         const days = getDaysRemaining(t.dueDate);
                         return (
@@ -575,7 +678,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ onOpenNewTask }) => {
                                 Assignee: {t.assigneeName}
                               </span>
                               <span
-                                className={`text-[10px] font-mono font-semibold ${
+                                className={`text-[10px] font-mono tabular-nums font-semibold ${
                                   days.urgent ? 'text-rose-500' : 'text-slate-500'
                                 }`}
                               >

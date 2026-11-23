@@ -19,6 +19,7 @@ import {
   initialCloudFiles,
   exampleTaskScenarios,
   initialSubscription,
+  initialProjectTemplates,
 } from './src/initialData.ts';
 import {
   User,
@@ -41,6 +42,8 @@ import {
   BillingInterval,
   PaymentMethod,
   BillingInvoice,
+  ProjectTemplate,
+  ProjectMilestone,
 } from './src/types.ts';
 
 const app = express();
@@ -52,6 +55,7 @@ app.use(express.json());
 interface DBState {
   users: User[];
   projects: Project[];
+  projectTemplates: ProjectTemplate[];
   tasks: Task[];
   channels: ChatChannel[];
   messages: ChatMessage[];
@@ -70,6 +74,7 @@ interface DBState {
 const db: DBState = {
   users: [...initialUsers],
   projects: [...initialProjects],
+  projectTemplates: JSON.parse(JSON.stringify(initialProjectTemplates)),
   tasks: [...initialTasks],
   channels: [...initialChannels],
   messages: [...initialMessages],
@@ -163,6 +168,7 @@ wss.on('connection', (ws) => {
       payload: {
         users: db.users,
         projects: db.projects,
+        projectTemplates: db.projectTemplates,
         tasks: db.tasks,
         channels: db.channels,
         messages: db.messages,
@@ -655,6 +661,78 @@ wss.on('connection', (ws) => {
           broadcast('SUBSCRIPTION_UPDATED', db.subscription);
           break;
         }
+
+        case 'PROJECT_TEMPLATE_CREATE': {
+          const newTpl: ProjectTemplate = {
+            ...payload,
+            id: payload.id || `tpl-${Date.now()}`,
+            usageCount: payload.usageCount || 0,
+            updatedAt: new Date().toISOString(),
+          };
+          db.projectTemplates.unshift(newTpl);
+          broadcast('PROJECT_TEMPLATE_CREATED', newTpl);
+          break;
+        }
+
+        case 'PROJECT_TEMPLATE_UPDATE': {
+          const tIdx = db.projectTemplates.findIndex((tpl) => tpl.id === payload.id);
+          if (tIdx !== -1) {
+            db.projectTemplates[tIdx] = {
+              ...db.projectTemplates[tIdx],
+              ...payload,
+              updatedAt: new Date().toISOString(),
+            };
+            broadcast('PROJECT_TEMPLATE_UPDATED', db.projectTemplates[tIdx]);
+          }
+          break;
+        }
+
+        case 'PROJECT_TEMPLATE_DELETE': {
+          db.projectTemplates = db.projectTemplates.filter((tpl) => tpl.id !== payload.id);
+          broadcast('PROJECT_TEMPLATE_DELETED', payload.id);
+          break;
+        }
+
+        case 'PROJECT_CREATE_FROM_TEMPLATE': {
+          const { project, tasks: newTasks } = payload as {
+            project: Project;
+            tasks: Task[];
+          };
+          if (project && !db.projects.some((p) => p.id === project.id)) {
+            db.projects.unshift(project);
+          }
+          const createdTasks: Task[] = [];
+          if (Array.isArray(newTasks)) {
+            newTasks.forEach((nt) => {
+              if (!db.tasks.some((t) => t.id === nt.id)) {
+                db.tasks.unshift(nt);
+                createdTasks.push(nt);
+              }
+            });
+          }
+          if (project?.templateId) {
+            const tpl = db.projectTemplates.find((t) => t.id === project.templateId);
+            if (tpl) {
+              tpl.usageCount = (tpl.usageCount || 0) + 1;
+              broadcast('PROJECT_TEMPLATE_UPDATED', tpl);
+            }
+          }
+          broadcast('PROJECT_CREATED_WITH_TASKS', { project, tasks: createdTasks });
+          break;
+        }
+
+        case 'PROJECT_MILESTONE_TOGGLE': {
+          const { projectId, milestoneId } = payload;
+          const proj = db.projects.find((p) => p.id === projectId);
+          if (proj && proj.milestones) {
+            const ms = proj.milestones.find((m) => m.id === milestoneId);
+            if (ms) {
+              ms.completed = !ms.completed;
+              broadcast('PROJECT_MILESTONE_UPDATED', { projectId, milestones: proj.milestones });
+            }
+          }
+          break;
+        }
       }
     } catch (err) {
       console.error('WebSocket message parsing error:', err);
@@ -681,6 +759,7 @@ app.get('/api/state', (req, res) => {
   res.json({
     users: db.users,
     projects: db.projects,
+    projectTemplates: db.projectTemplates,
     tasks: db.tasks,
     channels: db.channels,
     messages: db.messages,
@@ -694,6 +773,43 @@ app.get('/api/state', (req, res) => {
     cloudFiles: db.cloudFiles,
     subscription: db.subscription,
   });
+});
+
+app.get('/api/project-templates', (req, res) => {
+  res.json({ success: true, templates: db.projectTemplates });
+});
+
+app.post('/api/project-templates', (req, res) => {
+  const tpl: ProjectTemplate = {
+    ...req.body,
+    id: req.body.id || `tpl-${Date.now()}`,
+    usageCount: req.body.usageCount || 0,
+    updatedAt: new Date().toISOString(),
+  };
+  db.projectTemplates.unshift(tpl);
+  broadcast('PROJECT_TEMPLATE_CREATED', tpl);
+  res.json({ success: true, template: tpl });
+});
+
+app.put('/api/project-templates/:id', (req, res) => {
+  const idx = db.projectTemplates.findIndex((t) => t.id === req.params.id);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, error: 'Template not found' });
+  }
+  db.projectTemplates[idx] = {
+    ...db.projectTemplates[idx],
+    ...req.body,
+    id: req.params.id,
+    updatedAt: new Date().toISOString(),
+  };
+  broadcast('PROJECT_TEMPLATE_UPDATED', db.projectTemplates[idx]);
+  res.json({ success: true, template: db.projectTemplates[idx] });
+});
+
+app.delete('/api/project-templates/:id', (req, res) => {
+  db.projectTemplates = db.projectTemplates.filter((t) => t.id !== req.params.id);
+  broadcast('PROJECT_TEMPLATE_DELETED', req.params.id);
+  res.json({ success: true });
 });
 
 app.get('/api/subscription', (req, res) => {
